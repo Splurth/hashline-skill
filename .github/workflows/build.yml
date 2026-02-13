@@ -60,24 +60,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
+
+      - name: Authenticate gh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | gh auth login --with-token
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create Release
+      - name: Create Release and Upload Assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          echo "Creating release for tag: $TAG_NAME"
-          # Find all binary files in the artifacts directory
-          find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_*.tar.gz' \) -print0 | sort -z | xargs -0 -I{} echo "Found asset: {}"
-          ASSETS=$(find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_*.tar.gz' \) | tr '\n' ' ')
-          if [ -z "$ASSETS" ]; then
-            echo "No assets found to upload!"
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "Creating release for tag: $TAG"
+
+          # Find all built binary files and the Node.js tarball
+          mapfile -t assets < <(find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_*.tar.gz' \) | sort)
+
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No assets found!"
             exit 1
           fi
-          # Create release and upload assets in one command
-          gh release create "$TAG_NAME" $ASSETS --generate-notes --latest
+
+          echo "Found ${#assets[@]} asset(s):"
+          printf '%s\n' "${assets[@]}"
+
+          # Create release and upload all assets in one command
+          gh release create "$TAG" "${assets[@]}" --generate-notes
