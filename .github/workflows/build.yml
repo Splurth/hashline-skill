@@ -41,20 +41,32 @@ jobs:
           fi
           go build -ldflags="-s -w" -o "$output_name" hashline.go
 
-      - name: Package Node.js fallback
-        run: |
-          tar -czf hashline_nodejs_linux_amd64.tar.gz hashline.js package.json
-
-      - name: Upload binaries
+      - name: Upload Go binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: go-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             hashline_${{ matrix.goos }}_${{ matrix.goarch }}*
-            hashline_nodejs_*.tar.gz
+
+  package-node:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package Node.js fallback
+        run: |
+          tar -czf hashline_nodejs_fallback.tar.gz hashline.js package.json
+
+      - name: Upload Node.js fallback artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodejs-fallback
+          path: |
+            hashline_nodejs_fallback.tar.gz
 
   release:
-    needs: build
+    needs: [build, package-node]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -84,8 +96,8 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Creating release for tag: $TAG"
 
-          # Find all built binary files and the Node.js tarball
-          mapfile -t assets < <(find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_*.tar.gz' \) | sort)
+          # Find all asset files
+          mapfile -t assets < <(find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_fallback.tar.gz' \) | sort)
 
           if [ ${#assets[@]} -eq 0 ]; then
             echo "No assets found!"
@@ -95,5 +107,5 @@ jobs:
           echo "Found ${#assets[@]} asset(s):"
           printf '%s\n' "${assets[@]}"
 
-          # Create release and upload all assets in one command
+          # Create release and upload all assets
           gh release create "$TAG" "${assets[@]}" --generate-notes
