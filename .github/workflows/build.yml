@@ -41,32 +41,15 @@ jobs:
           fi
           go build -ldflags="-s -w" -o "$output_name" hashline.go
 
-      - name: Upload Go binary artifact
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: go-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: hashline_${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             hashline_${{ matrix.goos }}_${{ matrix.goarch }}*
 
-  package-node:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Package Node.js fallback
-        run: |
-          tar -czf hashline_nodejs_fallback.tar.gz hashline.js package.json
-
-      - name: Upload Node.js fallback artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nodejs-fallback
-          path: |
-            hashline_nodejs_fallback.tar.gz
-
   release:
-    needs: [build, package-node]
+    needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -96,8 +79,8 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Creating release for tag: $TAG"
 
-          # Find all asset files
-          mapfile -t assets < <(find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_fallback.tar.gz' \) | sort)
+          # Find all built Go binaries
+          mapfile -t assets < <(find artifacts -type f -name 'hashline_*' | sort)
 
           if [ ${#assets[@]} -eq 0 ]; then
             echo "No assets found!"
