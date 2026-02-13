@@ -10,18 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
-        exclude:
-          - goos: darwin
-            goarch: 386
-          - goos: windows
-            goarch: 386
-
     steps:
       - uses: actions/checkout@v4
 
@@ -30,65 +20,27 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Build Go binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+      - name: Build binaries
         run: |
-          output_name="hashline_${{ matrix.goos }}_${{ matrix.goarch }}"
-          if [ "$GOOS" = "windows" ]; then
-            output_name="$output_name.exe"
-          fi
-          go build -ldflags="-s -w" -o "$output_name" hashline.go
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hashline_${{ matrix.goos }}-${{ matrix.goarch }}
-          path: |
-            hashline_${{ matrix.goos }}_${{ matrix.goarch }}*
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install GitHub CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gh
-
-      - name: Authenticate gh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "$GITHUB_TOKEN" | gh auth login --with-token
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release and Upload Assets
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
+         #!/usr/bin/env bash
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          echo "Creating release for tag: $TAG"
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              # Skip unsupported combinations
+              if [[ "$os" == "darwin" && "$arch" == "386" ]] || [[ "$os" == "windows" && "$arch" == "386" ]]; then
+                continue
+              fi
+              GOOS=$os GOARCH=$arch go build -ldflags="-s -w" -o "hashline_${os}_${arch}" hashline.go
+            done
+          done
 
-          # Find all built Go binaries
-          mapfile -t assets < <(find artifacts -type f -name 'hashline_*' | sort)
-
-          if [ ${#assets[@]} -eq 0 ]; then
-            echo "No assets found!"
-            exit 1
-          fi
-
-          echo "Found ${#assets[@]} asset(s):"
-          printf '%s\n' "${assets[@]}"
-
-          # Create release and upload all assets
-          gh release create "$TAG" "${assets[@]}" --generate-notes
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            hashline_linux_amd64
+            hashline_linux_arm64
+            hashline_darwin_amd64
+            hashline_darwin_arm64
+            hashline_windows_amd64.exe
+          generate_release_notes: true
