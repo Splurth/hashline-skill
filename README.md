@@ -129,6 +129,10 @@ The binary is discovered in this order:
 3. `hashline` in `PATH`.
 4. Legacy paths (`<workspace>/hashline/hashline_go`, etc.) for backward compatibility.
 
+## Node.js fallback
+
+The repository includes a pure‑JavaScript implementation (`hashline.js`) plus `package.json`. This is primarily for development and environments without Go. It is **not** distributed in releases — if you need it, copy the files directly from the source repository.
+
 ## Testing
 
 Run the included test script:
