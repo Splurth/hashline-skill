@@ -66,8 +66,18 @@ jobs:
           path: artifacts
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/**/*
-          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "Creating release for tag: $TAG_NAME"
+          # Find all binary files in the artifacts directory
+          find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_*.tar.gz' \) -print0 | sort -z | xargs -0 -I{} echo "Found asset: {}"
+          ASSETS=$(find artifacts -type f \( -name 'hashline_*' -o -name 'hashline_nodejs_*.tar.gz' \) | tr '\n' ' ')
+          if [ -z "$ASSETS" ]; then
+            echo "No assets found to upload!"
+            exit 1
+          fi
+          # Create release and upload assets in one command
+          gh release create "$TAG_NAME" $ASSETS --generate-notes --latest
