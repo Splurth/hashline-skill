@@ -1,5 +1,5 @@
-# Binaries
-hashline_go
+# Binaries (built per-platform)
+bin/*
 
 # Test files
 test.js
