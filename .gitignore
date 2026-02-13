@@ -1,0 +1,18 @@
+# Binaries
+hashline_go
+
+# Test files
+test.js
+sample.go
+genlarge.go
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

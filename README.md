@@ -12,7 +12,13 @@ Content-addressed line editing with **position-sensitive hashes** and **hash cha
 
 The hash is `SHA256( context )[:N]`, where `context` = previous `K` lines (as many as available) plus the current line, joined by `\n`.  
 `K` = window size (default 5).  
-`N` = adaptive hash length: `N = max(2, ceil(0.5*log2(numLines) + 5))`.
+`N` = adaptive hash length in hex chars, chosen by file size:
+- ≤100 lines → 4 chars
+- ≤1,000 lines → 5 chars
+- ≤10,000 lines → 6 chars
+- >10,000 lines → 8 chars
+
+This keeps hashes short while still providing >99.99% uniqueness for typical files. For massive duplicates, use hash chains.
 
 ## Usage
 

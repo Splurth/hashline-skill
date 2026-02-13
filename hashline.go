@@ -4,35 +4,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"os"
 	"strings"
 )
 
 const defaultWindow = 5
 
-// Usage:
-//   hashline read <file>
-//   hashline edit <file> <operation> [args...]
-// Operations:
-//   replace_line <hash[ ...]> <newContent>    // chain of hashes, last is target
-//   replace_range <startHash>-<endHash> <newContent>
-//   insert_after <hash[ ...]> <newContent>
-//   insert_before <hash[ ...]> <newContent>
-// Options:
-//   --dry-run preview without writing
-
 func computeHashLength(numLines int) int {
-	if numLines <= 0 {
-		return 2
+	switch {
+	case numLines <= 100:
+		return 4
+	case numLines <= 1000:
+		return 5
+	case numLines <= 10000:
+		return 6
+	default:
+		return 8
 	}
-	// Target: H >= N^2 * 2^20 => 4k >= 2*log2(N) + 20 => k >= 0.5*log2(N) + 5
-	// Using float64 math.
-	k := int(math.Ceil(0.5*math.Log2(float64(numLines)) + 5))
-	if k < 2 {
-		k = 2
-	}
-	return k
 }
 
 func contextualHash(lines []string, idx int, window int, hashLen int) string {
@@ -45,40 +33,46 @@ func contextualHash(lines []string, idx int, window int, hashLen int) string {
 	return hex.EncodeToString(h[:])[:hashLen]
 }
 
-func computeAllContextualHashes(lines []string) ([]string, int) {
-	numLines := len(lines)
-	hashLen := computeHashLength(numLines)
-	hashes := make([]string, numLines)
-	for i := range lines {
-		hashes[i] = contextualHash(lines, i, defaultWindow, hashLen)
-	}
-	return hashes, hashLen
+type lineHash struct {
+	hash string
+	line string
+	idx  int
 }
 
-func findLineIndex(hashes []string, targetHash string, start int) int {
+func computeAllContextualHashes(lines []string) []lineHash {
+	numLines := len(lines)
+	hashLen := computeHashLength(numLines)
+	result := make([]lineHash, numLines)
+	for i := range lines {
+		h := contextualHash(lines, i, defaultWindow, hashLen)
+		result[i] = lineHash{hash: h, line: lines[i], idx: i}
+	}
+	return result
+}
+
+func findLineIndexByHash(hashes []lineHash, targetHash string, start int) int {
 	for i := start; i < len(hashes); i++ {
-		if hashes[i] == targetHash {
+		if hashes[i].hash == targetHash {
 			return i
 		}
 	}
 	return -1
 }
 
-// findLineIndexByHashChain finds the line where the last hash in chain matches and all preceding hashes match the lines immediately before it in order.
-func findLineIndexByHashChain(hashes []string, chain []string) int {
+func findLineIndexByHashChain(hashes []lineHash, chain []string) int {
 	n := len(chain)
 	if n == 0 {
 		return -1
 	}
 	target := chain[n-1]
 	for i := 0; i < len(hashes); i++ {
-		if hashes[i] != target {
+		if hashes[i].hash != target {
 			continue
 		}
 		ok := true
 		for j := 1; j < n; j++ {
 			ctxIdx := i - j
-			if ctxIdx < 0 || hashes[ctxIdx] != chain[n-1-j] {
+			if ctxIdx < 0 || hashes[ctxIdx].hash != chain[n-1-j] {
 				ok = false
 				break
 			}
@@ -90,7 +84,7 @@ func findLineIndexByHashChain(hashes []string, chain []string) int {
 	return -1
 }
 
-func applyReplaceLine(lines []string, hashes []string, hashChain []string, newContent string) ([]string, error) {
+func applyReplaceLine(lines []string, hashes []lineHash, hashChain []string, newContent string) ([]string, error) {
 	idx := findLineIndexByHashChain(hashes, hashChain)
 	if idx == -1 {
 		return nil, fmt.Errorf("hash chain not found")
@@ -101,12 +95,12 @@ func applyReplaceLine(lines []string, hashes []string, hashChain []string, newCo
 	return newLines, nil
 }
 
-func applyReplaceRange(lines []string, hashes []string, startHash, endHash, newContent string) ([]string, error) {
-	startIdx := findLineIndex(hashes, startHash, 0)
+func applyReplaceRange(lines []string, hashes []lineHash, startHash, endHash, newContent string) ([]string, error) {
+	startIdx := findLineIndexByHash(hashes, startHash, 0)
 	if startIdx == -1 {
 		return nil, fmt.Errorf("start hash %s not found", startHash)
 	}
-	endIdx := findLineIndex(hashes, endHash, startIdx+1)
+	endIdx := findLineIndexByHash(hashes, endHash, startIdx+1)
 	if endIdx == -1 {
 		return nil, fmt.Errorf("end hash %s not found", endHash)
 	}
@@ -121,7 +115,7 @@ func applyReplaceRange(lines []string, hashes []string, startHash, endHash, newC
 	return out, nil
 }
 
-func applyInsertAfter(lines []string, hashes []string, hashChain []string, newContent string) ([]string, error) {
+func applyInsertAfter(lines []string, hashes []lineHash, hashChain []string, newContent string) ([]string, error) {
 	idx := findLineIndexByHashChain(hashes, hashChain)
 	if idx == -1 {
 		return nil, fmt.Errorf("hash chain not found")
@@ -134,7 +128,7 @@ func applyInsertAfter(lines []string, hashes []string, hashChain []string, newCo
 	return out, nil
 }
 
-func applyInsertBefore(lines []string, hashes []string, hashChain []string, newContent string) ([]string, error) {
+func applyInsertBefore(lines []string, hashes []lineHash, hashChain []string, newContent string) ([]string, error) {
 	idx := findLineIndexByHashChain(hashes, hashChain)
 	if idx == -1 {
 		return nil, fmt.Errorf("hash chain not found")
@@ -156,9 +150,13 @@ func readCommand(filePath string) {
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	linesSlice := make([]string, 0, len(lines))
 	linesSlice = append(linesSlice, lines...)
-	hashes, hashLen := computeAllContextualHashes(linesSlice)
+	hashes := computeAllContextualHashes(linesSlice)
+	hashLen := 4 // default; we compute it per file but we don't have it in computeAllContextualHashes; adjust function to return hashLen too. For simplicity, we compute length using first line's hash length.
+	if len(hashes) > 0 {
+		hashLen = len(hashes[0].hash)
+	}
 	for i, h := range hashes {
-		fmt.Printf("%d:%s|%s\n", i+1, h, linesSlice[i])
+		fmt.Printf("%d:%s|%s\n", i+1, h.hash, h.line)
 	}
 	fmt.Printf("# window: %d lines, hash length: %d chars (SHA256 prefix)\n", defaultWindow, hashLen)
 }
@@ -172,7 +170,11 @@ func editCommand(filePath, op string, args []string, dryRun bool) {
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	linesSlice := make([]string, 0, len(lines))
 	linesSlice = append(linesSlice, lines...)
-	hashes, hashLen := computeAllContextualHashes(linesSlice)
+	hashes := computeAllContextualHashes(linesSlice)
+	hashLen := 4
+	if len(hashes) > 0 {
+		hashLen = len(hashes[0].hash)
+	}
 
 	var out []string
 	var errEdit error
